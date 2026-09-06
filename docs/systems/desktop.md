@@ -81,7 +81,7 @@ Close does **not** quit the app. The `close` event is intercepted; the window is
 2. Saved instance URL from `{userData}/instance-url.json`
 3. No URL: loads `resources/instance-picker.html` (local HTML file)
 
-Instance URL management functions: `loadInstanceUrl()`, `saveInstanceUrl()`, `clearInstanceUrl()` — all operate on `{userData}/instance-url.json`.
+Instance URL management functions: `loadInstanceUrl()`, `loadDirectConnection()`, `saveInstanceUrl()`, `clearInstanceUrl()` — all operate on `{userData}/instance-url.json`.
 
 ### Interface Scale
 
@@ -121,15 +121,30 @@ When no instance URL is configured, the app loads `resources/instance-picker.htm
 
 After navigation (both to an instance URL and back to the picker), the main process forces Electron to re-evaluate drag regions by momentarily resizing the window (+1px then back).
 
+The picker also offers a per-instance **Connect directly** option. It changes
+Electron's default session between the operating system's proxy configuration
+and `direct` mode before probing or loading the selected instance, and persists
+the choice as `directConnection` next to the URL. This is useful when a local
+VPN exposes an HTTP proxy to Chromium but keeps its domain bypass rules inside
+the VPN application. Direct mode bypasses that HTTP proxy; routing imposed by a
+VPN tunnel or the operating system still applies. The option defaults to off,
+including for existing `instance-url.json` files, so normal system and
+corporate proxy behavior is preserved.
+
 ### Non-destructive "Change Instance" navigation
 
 The tray menu, macOS app menu, and recovery surface all include a "Change Instance" option. This navigation is **non-destructive**: the saved instance URL is preserved when navigating to the picker. The picker's `init()` function reads the current saved URL via `getInstanceUrl()` IPC and, if one exists:
 
 - Pre-fills the URL input with the current value.
+- Restores the saved direct-connection choice.
 - Shows a Cancel button (hidden by default; only shown when a saved URL exists).
 - Switches the header copy from "Welcome to Backspace / Connect to your instance" to "Switch instance / Connect to a different Backspace instance, or cancel to stay."
 
-**Cancel button behavior:** Clicking Cancel re-saves the existing URL via `setInstanceUrl` (idempotent) and navigates back to it. The saved URL is only overwritten when the user explicitly clicks Connect on a *different* URL. This means the user can always back out of an accidental "Change Instance" click.
+**Cancel button behavior:** Clicking Cancel re-saves the existing URL and
+direct-connection choice via `setInstanceUrl` (idempotent) and navigates back
+to it. The saved values are only overwritten when the user explicitly clicks
+Connect. This means the user can always back out of an accidental "Change
+Instance" click.
 
 **Loading state:** `setLoading(true)` — invoked when Connect is clicked — disables both the Connect button and the Cancel button to prevent a race between the `setInstanceUrl` calls.
 

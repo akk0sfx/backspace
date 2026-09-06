@@ -109,7 +109,10 @@ contextBridge.exposeInMainWorld('backspace', {
 
   // Instance URL management
   getInstanceUrl: () => ipcRenderer.invoke('get-instance-url'),
-  setInstanceUrl: (url: string) => ipcRenderer.invoke('set-instance-url', url),
+  getDirectConnection: () => ipcRenderer.invoke('get-direct-connection'),
+  setDirectConnection: (enabled: boolean) => ipcRenderer.invoke('set-direct-connection', enabled),
+  setInstanceUrl: (url: string, directConnection?: boolean) =>
+    ipcRenderer.invoke('set-instance-url', url, directConnection),
   clearInstanceUrl: () => ipcRenderer.invoke('clear-instance-url'),
 
   // Language: the renderer owns the choice; main relabels its tray and menus.

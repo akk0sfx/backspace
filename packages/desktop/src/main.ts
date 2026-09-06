@@ -20,6 +20,7 @@ import { KeybindManager } from './keybindManager';
 import { deriveStartMinimizedFromArgs, parseExecPathFromDesktopFile, shouldReapplyAppImage } from './autoLaunch';
 import {
   loadInstanceUrl,
+  loadDirectConnection,
   saveInstanceUrl,
   clearInstanceUrl,
   getPickerPath,
@@ -88,6 +89,13 @@ let isQuitting = false;
 let pendingDeepLink: string | null = null;
 
 const knownInstanceOrigins = new Set<string>();
+
+async function applyInstanceProxyMode(directConnection: boolean): Promise<void> {
+  await session.defaultSession.setProxy({
+    mode: directConnection ? 'direct' : 'system',
+  });
+  await session.defaultSession.forceReloadProxyConfig();
+}
 
 // ─── AGPL-3.0 § 13 source offer ─────────────────────────────────────────────
 // Upstream fallback for the "Source code" menu items and the About panel.
@@ -643,9 +651,15 @@ function registerIpcHandlers(): void {
 
   // Instance URL management
   ipcMain.handle('get-instance-url', () => loadInstanceUrl());
+  ipcMain.handle('get-direct-connection', () => loadDirectConnection());
+  ipcMain.handle('set-direct-connection', async (_event, enabled: boolean) => {
+    await applyInstanceProxyMode(enabled === true);
+  });
 
-  ipcMain.handle('set-instance-url', (_event, url: string) => {
-    saveInstanceUrl(url);
+  ipcMain.handle('set-instance-url', async (_event, url: string, directConnection?: boolean) => {
+    const useDirectConnection = directConnection === true;
+    await applyInstanceProxyMode(useDirectConnection);
+    saveInstanceUrl(url, useDirectConnection);
     if (mainWindow) {
       mainWindow.loadURL(url);
       // Force Electron to re-evaluate drag regions after navigation
@@ -659,8 +673,9 @@ function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle('clear-instance-url', () => {
+  ipcMain.handle('clear-instance-url', async () => {
     clearInstanceUrl();
+    await applyInstanceProxyMode(false);
     if (mainWindow) {
       mainWindow.loadFile(getPickerPath(), { query: { lang: getDesktopLanguage() } });
       // Force Electron to re-evaluate drag regions after navigation
@@ -1235,6 +1250,12 @@ if (!gotTheLock) {
     if (process.platform !== 'darwin') {
       applyEditOnlyMenu();
     }
+
+    // The instance picker can persist a direct connection for networks where a
+    // local VPN/proxy does not expose its domain bypass rules to Chromium.
+    await applyInstanceProxyMode(
+      process.env.BACKSPACE_URL ? false : loadDirectConnection(),
+    );
 
     // Purge ALL stale caches so Electron always loads fresh code on launch
     await session.defaultSession.clearStorageData({ storages: ['serviceworkers'] });

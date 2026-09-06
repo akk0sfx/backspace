@@ -138,7 +138,9 @@ interface BackspaceElectronAPI {
 
   // Instance URL management
   getInstanceUrl: () => Promise<string | null>;
-  setInstanceUrl: (url: string) => Promise<void>;
+  getDirectConnection?: () => Promise<boolean>;
+  setDirectConnection?: (enabled: boolean) => Promise<void>;
+  setInstanceUrl: (url: string, directConnection?: boolean) => Promise<void>;
   clearInstanceUrl: () => Promise<void>;
 
   // Language: the renderer owns the choice; main relabels its tray and menus.

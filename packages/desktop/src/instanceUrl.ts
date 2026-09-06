@@ -15,8 +15,20 @@ export function loadInstanceUrl(): string | null {
   }
 }
 
-export function saveInstanceUrl(url: string): void {
-  fs.writeFileSync(getInstanceUrlPath(), JSON.stringify({ url }));
+export function loadDirectConnection(): boolean {
+  try {
+    const data = JSON.parse(fs.readFileSync(getInstanceUrlPath(), 'utf-8'));
+    return data.directConnection === true;
+  } catch {
+    return false;
+  }
+}
+
+export function saveInstanceUrl(url: string, directConnection = false): void {
+  fs.writeFileSync(
+    getInstanceUrlPath(),
+    JSON.stringify({ url, directConnection }),
+  );
 }
 
 export function clearInstanceUrl(): void {

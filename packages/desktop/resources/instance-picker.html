@@ -135,6 +135,40 @@
       opacity: 0.5;
     }
 
+    .direct-option {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.625rem;
+      margin: -0.25rem 0 1.25rem;
+      cursor: pointer;
+    }
+
+    .direct-option input {
+      width: 1rem;
+      height: 1rem;
+      margin-top: 0.125rem;
+      accent-color: #7c6cf6;
+    }
+
+    .direct-option span {
+      display: block;
+      font-size: 0.8125rem;
+      color: #d8d8de;
+    }
+
+    .direct-option small {
+      display: block;
+      margin-top: 0.125rem;
+      color: #777783;
+      font-size: 0.75rem;
+      line-height: 1.35;
+    }
+
+    .direct-option:has(input:disabled) {
+      opacity: 0.5;
+      cursor: default;
+    }
+
     /* ── Button — accent-primary with white text (matches login) ── */
     .cancel-btn {
       width: 100%;
@@ -286,6 +320,13 @@
               autofocus
             />
           </div>
+          <label class="direct-option">
+            <input id="direct-connection" type="checkbox" />
+            <span>
+              <span data-i18n="directConnection">Connect directly</span>
+              <small data-i18n="directConnectionHint">Bypass the system HTTP proxy for this instance. VPN tunnel rules still apply.</small>
+            </span>
+          </label>
           <button type="submit" class="connect-btn" id="connect-btn" data-i18n="connect">Connect</button>
           <button type="button" class="cancel-btn" id="cancel-btn" style="display: none;" data-i18n="cancel">Cancel</button>
         </form>
@@ -315,6 +356,8 @@
         switchTitle: 'Switch instance',
         switchSubtitle: 'Connect to a different Backspace instance, or cancel to stay.',
         urlLabel: 'Instance URL',
+        directConnection: 'Connect directly',
+        directConnectionHint: 'Bypass the system HTTP proxy for this instance. VPN tunnel rules still apply.',
         connect: 'Connect',
         cancel: 'Cancel',
         connecting: 'Connecting…',
@@ -331,6 +374,8 @@
         switchTitle: 'Сменить сервер',
         switchSubtitle: 'Подключитесь к другому серверу Backspace или отмените, чтобы остаться.',
         urlLabel: 'Адрес сервера',
+        directConnection: 'Прямое подключение',
+        directConnectionHint: 'Не использовать системный HTTP-прокси для этого сервера. Правила VPN-туннеля продолжат действовать.',
         connect: 'Подключиться',
         cancel: 'Отмена',
         connecting: 'Подключение…',
@@ -347,6 +392,8 @@
         switchTitle: 'Instanz wechseln',
         switchSubtitle: 'Verbinde dich mit einer anderen Backspace-Instanz oder brich ab, um zu bleiben.',
         urlLabel: 'Instanz-URL',
+        directConnection: 'Direkt verbinden',
+        directConnectionHint: 'Den HTTP-Systemproxy für diese Instanz umgehen. VPN-Tunnelregeln gelten weiterhin.',
         connect: 'Verbinden',
         cancel: 'Abbrechen',
         connecting: 'Verbindung wird hergestellt…',
@@ -378,7 +425,9 @@
     const nameEl = document.getElementById('instance-name');
     const versionEl = document.getElementById('instance-version');
     const cancelBtn = document.getElementById('cancel-btn');
+    const directConnection = document.getElementById('direct-connection');
     let savedUrl = null;
+    let savedDirectConnection = false;
 
     function normalizeUrl(raw) {
       let url = raw.trim();
@@ -406,6 +455,7 @@
       input.disabled = loading;
       btn.disabled = loading;
       cancelBtn.disabled = loading;
+      directConnection.disabled = loading;
       loadingEl.style.display = loading ? 'block' : 'none';
       if (loading) {
         hideError();
@@ -418,6 +468,12 @@
           savedUrl = await window.backspace.getInstanceUrl();
         } catch { savedUrl = null; }
       }
+      if (window.backspace && window.backspace.getDirectConnection) {
+        try {
+          savedDirectConnection = await window.backspace.getDirectConnection();
+        } catch { savedDirectConnection = false; }
+      }
+      directConnection.checked = savedDirectConnection;
       if (savedUrl) {
         input.value = savedUrl;
         cancelBtn.style.display = 'block';
@@ -434,7 +490,7 @@
       cancelBtn.disabled = true;
       btn.disabled = true;
       if (window.backspace && window.backspace.setInstanceUrl) {
-        await window.backspace.setInstanceUrl(savedUrl);
+        await window.backspace.setInstanceUrl(savedUrl, savedDirectConnection);
       }
     });
 
@@ -452,6 +508,10 @@
       setLoading(true);
 
       try {
+        if (window.backspace && window.backspace.setDirectConnection) {
+          await window.backspace.setDirectConnection(directConnection.checked);
+        }
+
         const res = await fetch(url + '/api/instance/info', {
           signal: AbortSignal.timeout(10000),
         });
@@ -474,7 +534,7 @@
 
         // Save and navigate
         if (window.backspace && window.backspace.setInstanceUrl) {
-          await window.backspace.setInstanceUrl(url);
+          await window.backspace.setInstanceUrl(url, directConnection.checked);
         }
       } catch (err) {
         setLoading(false);
