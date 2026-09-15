@@ -59,11 +59,29 @@ import {
   type ScreenSharePickerMode,
 } from './screenSharePolicy';
 import { getDesktopLanguage, isDesktopLanguage, saveStoredLanguage, translateDesktop } from './l10n';
+import {
+  needsMacOs27VpnRoutingWorkaround,
+  withVpnNetworkCostFieldTrial,
+} from './webrtcRouting';
 
 // Override Electron's package.json-derived app name so userData lives at
 // "<appData>/Backspace" instead of leaking the monorepo's "@backspace/desktop"
 // package name. Must run before any app.getPath('userData') consumer.
 app.setName('Backspace');
+
+// macOS 27 can expose both a NetworkExtension tunnel and its physical backing
+// interface to Chromium with equivalent ICE cost. Under motion, selecting the
+// tunnel/TCP path turns screen-share traffic into head-of-line blocking and
+// severe queueing. libwebrtc already ships a field trial that marks VPN routes
+// as more expensive while retaining them as fallback; enable it only for the
+// affected macOS generation and before Chromium subprocesses are created.
+if (needsMacOs27VpnRoutingWorkaround(process.platform, os.release())) {
+  const existingTrials = app.commandLine.getSwitchValue('force-fieldtrials');
+  app.commandLine.appendSwitch(
+    'force-fieldtrials',
+    withVpnNetworkCostFieldTrial(existingTrials),
+  );
+}
 
 // One-time migration from the historical scoped path. After the move the old
 // folder is gone, so subsequent launches hit the old-missing no-op branch.

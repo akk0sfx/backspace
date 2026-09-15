@@ -131,6 +131,13 @@ VPN tunnel or the operating system still applies. The option defaults to off,
 including for existing `instance-url.json` files, so normal system and
 corporate proxy behavior is preserved.
 
+On macOS 27 and newer, the desktop process also enables libwebrtc's
+`WebRTC-AddNetworkCostToVpn` field trial before Chromium starts. macOS can
+publish both a NetworkExtension tunnel and its physical backing interface with
+equivalent ICE cost; the trial makes a reachable physical route preferable
+while retaining the VPN candidate as a fallback. Earlier macOS releases and
+other operating systems keep Chromium's default behavior.
+
 ### Non-destructive "Change Instance" navigation
 
 The tray menu, macOS app menu, and recovery surface all include a "Change Instance" option. This navigation is **non-destructive**: the saved instance URL is preserved when navigating to the picker. The picker's `init()` function reads the current saved URL via `getInstanceUrl()` IPC and, if one exists:
