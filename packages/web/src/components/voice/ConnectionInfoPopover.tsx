@@ -34,6 +34,12 @@ function formatLossPercent(pct: number): string {
   return i18n.t('common:units.percent', { value: formatters.formatNumber(Math.round(pct * 10) / 10) });
 }
 
+function formatEndpoint(address: string | null, port: number | null): string {
+  if (!address) return '\u2014';
+  if (port === null) return address;
+  return address.includes(':') ? `[${address}]:${port}` : `${address}:${port}`;
+}
+
 const BAND_COLORS: Record<HealthBand, string> = {
   good: 'text-status-online',
   warn: 'text-status-idle',
@@ -73,8 +79,13 @@ function trackLabel(direction: 'send' | 'recv', source: string, participantName:
 
 const Row = ({ label, value, colorClass }: { label: string; value: string; colorClass?: string }) => (
   <div className="flex items-center justify-between py-[3px]">
-    <span className="text-[12px] text-txt-tertiary">{label}</span>
-    <span className={`text-[12px] font-medium ${colorClass ?? 'text-txt-secondary'}`}>{value}</span>
+    <span className="text-[12px] text-txt-tertiary shrink-0 mr-2">{label}</span>
+    <span
+      className={`text-[12px] font-medium truncate ${colorClass ?? 'text-txt-secondary'}`}
+      title={value}
+    >
+      {value}
+    </span>
   </div>
 );
 
@@ -175,7 +186,7 @@ export function ConnectionInfoPopover({ open, onClose, anchorRef }: ConnectionIn
     <div
       ref={popoverRef}
       style={style}
-      className="w-[300px] glass rounded-lg overflow-hidden"
+      className="w-[340px] glass rounded-lg overflow-hidden"
     >
       <div className="px-3 py-2 border-b border-border-hard">
         <span className="text-[14px] font-bold text-txt-primary">{t('voice:connectionInfo.title')}</span>
@@ -205,14 +216,27 @@ export function ConnectionInfoPopover({ open, onClose, anchorRef }: ConnectionIn
               value={stats.network.jitter !== null ? formatMilliseconds(stats.network.jitter) : '\u2014'}
               colorClass={stats.network.jitter !== null ? jitterColor(stats.network.jitter) : undefined}
             />
-            <Row label={t('voice:connectionInfo.network.server')} value={stats.network.serverAddress ?? '\u2014'} />
+            <Row
+              label={t('voice:connectionInfo.network.server')}
+              value={formatEndpoint(stats.network.serverAddress, stats.network.serverPort)}
+            />
+            <Row
+              label={t('voice:connectionInfo.network.localCandidate')}
+              value={formatEndpoint(stats.network.localAddress, stats.network.localPort)}
+            />
             <Row
               label={t('voice:connectionInfo.network.protocol')}
               value={
                 stats.network.protocol
-                  ? `${stats.network.protocol}${stats.network.candidateType ? ` (${stats.network.candidateType})` : ''}`
+                  ? `${stats.network.protocol}${stats.network.localCandidateType || stats.network.candidateType
+                    ? ` (${stats.network.localCandidateType ?? '?'} \u2192 ${stats.network.candidateType ?? '?'})`
+                    : ''}${stats.network.relayProtocol ? ` via ${stats.network.relayProtocol}` : ''}`
                   : '\u2014'
               }
+            />
+            <Row
+              label={t('voice:connectionInfo.network.networkType')}
+              value={stats.network.networkType ?? '\u2014'}
             />
 
             {/* Audio Tracks */}

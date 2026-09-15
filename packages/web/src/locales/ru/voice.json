@@ -49,9 +49,11 @@
     "network": {
       "ping": "Пинг",
       "packetLoss": "Потеря пакетов",
-      "jitter": "Джиттер",
+      "jitter": "Джиттер входящего аудио",
       "server": "Сервер",
-      "protocol": "Протокол"
+      "localCandidate": "Локальный кандидат",
+      "protocol": "Протокол",
+      "networkType": "Тип сети"
     },
     "video": {
       "requestedCodec": "Запрошенный кодек",

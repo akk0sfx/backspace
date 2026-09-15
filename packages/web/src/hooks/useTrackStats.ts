@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Track } from 'livekit-client';
 import { getActiveRoom } from './useLiveKit';
 import { discoverPeerConnections } from '../utils/livekitInternals';
+import { extractIceRoute, packetDelta, packetLossPercent } from '../utils/webrtcStats';
 
 // ── Types ──
 
@@ -58,8 +59,14 @@ export interface NetworkStats {
   packetLoss: number | null;
   jitter: number | null;
   serverAddress: string | null;
+  serverPort: number | null;
   protocol: string | null;
   candidateType: string | null;
+  localAddress: string | null;
+  localPort: number | null;
+  localCandidateType: string | null;
+  networkType: string | null;
+  relayProtocol: string | null;
 }
 
 export interface TrackStatsSnapshot {
@@ -152,89 +159,7 @@ export function useTrackStats(enabled: boolean): TrackStatsSnapshot | null {
       const prev = prevSampleRef.current;
       const now = performance.now();
 
-      // ── Step A: Network stats + codec map from pc.getStats() ──
-      const network: NetworkStats = {
-        ping: null,
-        packetLoss: null,
-        jitter: null,
-        serverAddress: null,
-        protocol: null,
-        candidateType: null,
-      };
-
-      // Global codec map across all PCs
-      const globalCodecMap = new Map<string, string>();
-
-      for (const pc of pcs) {
-        let reports: RTCStatsReport;
-        try {
-          reports = await pc.getStats();
-        } catch {
-          continue;
-        }
-
-        // Pass 1: Collect codecs, find transport's selected candidate pair
-        let selectedPairId: string | null = null;
-        reports.forEach((report: any) => {
-          if (report.type === 'codec') {
-            globalCodecMap.set(report.id, report.mimeType?.split('/')[1] ?? report.mimeType ?? '');
-          }
-          if (report.type === 'transport' && report.selectedCandidatePairId) {
-            selectedPairId = report.selectedCandidatePairId;
-          }
-        });
-
-        // Pass 2: Resolve active candidate pair (three-tier fallback)
-        let activePair: any = null;
-        if (selectedPairId) {
-          // Tier 1: Spec-correct — transport points directly to the active pair
-          activePair = reports.get(selectedPairId);
-        }
-        if (!activePair) {
-          // Tier 2: Active-bytes heuristic — the pair carrying the most data IS
-          // the active transport, regardless of state label or mDNS obfuscation
-          let maxBytes = 0;
-          reports.forEach((report: any) => {
-            if (report.type === 'candidate-pair') {
-              const total = (report.bytesSent ?? 0) + (report.bytesReceived ?? 0);
-              if (total > maxBytes) {
-                maxBytes = total;
-                activePair = report;
-              }
-            }
-          });
-        }
-        if (!activePair) {
-          // Tier 3: Legacy fallback — first pair with state succeeded or in-progress
-          reports.forEach((report: any) => {
-            if (report.type === 'candidate-pair' && !activePair) {
-              if (report.state === 'succeeded' || report.state === 'in-progress') {
-                activePair = report;
-              }
-            }
-          });
-        }
-
-        // Pass 3: Extract network info from active pair
-        if (activePair) {
-          if (activePair.currentRoundTripTime != null) {
-            network.ping = Math.round(activePair.currentRoundTripTime * 1000);
-          }
-          if (!network.serverAddress && activePair.remoteCandidateId) {
-            const remoteCandidate = reports.get(activePair.remoteCandidateId);
-            if (remoteCandidate) {
-              const addr = remoteCandidate.address || remoteCandidate.ip;
-              if (addr) {
-                network.serverAddress = addr;
-                network.protocol = remoteCandidate.protocol ?? null;
-                network.candidateType = remoteCandidate.candidateType ?? null;
-              }
-            }
-          }
-        }
-      }
-
-      // ── Step B: Build TrackIdentityMap ──
+      // ── Step A: Build TrackIdentityMap ──
       const identityMap = new Map<string, TrackIdentity>();
 
       // Local tracks
@@ -266,11 +191,72 @@ export function useTrackStats(enabled: boolean): TrackStatsSnapshot | null {
         }
       }
 
-      // ── Step C & D: Per-sender and per-receiver stats ──
+      // Prefer the transport receiving the visible screen-share. With LiveKit's
+      // dual-PC fallback, taking ping from one PC and the address from another
+      // produces a convincing but false route diagnosis.
+      const rankedPcs = pcs.map((pc, index) => {
+        let rank = 0;
+        for (const receiver of pc.getReceivers()) {
+          const identity = receiver.track ? identityMap.get(receiver.track.id) : undefined;
+          if (identity?.source === 'screen_share') {
+            rank = 2;
+            break;
+          }
+          if (identity) rank = 1;
+        }
+        return { pc, index, rank };
+      }).sort((a, b) => b.rank - a.rank || a.index - b.index);
+
+      // ── Step B: Network stats + codec map from pc.getStats() ──
+      const network: NetworkStats = {
+        ping: null,
+        packetLoss: null,
+        jitter: null,
+        serverAddress: null,
+        serverPort: null,
+        protocol: null,
+        candidateType: null,
+        localAddress: null,
+        localPort: null,
+        localCandidateType: null,
+        networkType: null,
+        relayProtocol: null,
+      };
+
+      // Global codec map across all PCs
+      const globalCodecMap = new Map<string, string>();
+
+      let routeSelected = false;
+      for (const { pc } of rankedPcs) {
+        let reports: RTCStatsReport;
+        try {
+          reports = await pc.getStats();
+        } catch {
+          continue;
+        }
+
+        // Collect codecs from every peer connection.
+        reports.forEach((report: any) => {
+          if (report.type === 'codec') {
+            globalCodecMap.set(report.id, report.mimeType?.split('/')[1] ?? report.mimeType ?? '');
+          }
+        });
+
+        // Select all route fields from one PC as one atomic snapshot.
+        if (!routeSelected) {
+          const route = extractIceRoute(reports);
+          if (route) {
+            Object.assign(network, route);
+            routeSelected = true;
+          }
+        }
+      }
+
+      // ── Step C: Per-sender and per-receiver stats ──
       const audioTracks: AudioTrackStat[] = [];
       const videoTracks: VideoTrackStat[] = [];
-      let totalPacketsReceived = 0;
-      let totalPacketsLost = 0;
+      let totalPacketsReceivedDelta = 0;
+      let totalPacketsLostDelta = 0;
       const seenKeys = new Set<string>();
 
       for (const pc of pcs) {
@@ -456,18 +442,17 @@ export function useTrackStats(enabled: boolean): TrackStatsSnapshot | null {
             // Packet loss
             const packetsRecv = report.packetsReceived ?? 0;
             const packetsLost = report.packetsLost ?? 0;
-            totalPacketsReceived += packetsRecv;
-            totalPacketsLost += packetsLost;
-
-            let perTrackLoss: number | null = null;
-            if (prevEntry) {
-              const deltaRecv = packetsRecv - prevEntry.packetsRecv;
-              const deltaLost = packetsLost - prevEntry.packetsLost;
-              const deltaTotal = deltaRecv + deltaLost;
-              if (deltaTotal > 0) {
-                perTrackLoss = (deltaLost / deltaTotal) * 100;
-              }
+            const lossDelta = packetDelta(
+              { packetsReceived: packetsRecv, packetsLost },
+              prevEntry
+                ? { packetsReceived: prevEntry.packetsRecv, packetsLost: prevEntry.packetsLost }
+                : null,
+            );
+            if (lossDelta) {
+              totalPacketsReceivedDelta += lossDelta.received;
+              totalPacketsLostDelta += lossDelta.lost;
             }
+            const perTrackLoss = packetLossPercent(lossDelta);
 
             // Jitter
             const jitter = report.jitter != null ? Math.round(report.jitter * 1000) : null;
@@ -564,13 +549,13 @@ export function useTrackStats(enabled: boolean): TrackStatsSnapshot | null {
         }
       }
 
-      // ── Step E: Aggregate packet loss ──
-      const totalPackets = totalPacketsReceived + totalPacketsLost;
-      if (totalPackets > 0) {
-        network.packetLoss = (totalPacketsLost / totalPackets) * 100;
-      }
+      // ── Step D: Aggregate packet loss for this polling interval ──
+      network.packetLoss = packetLossPercent({
+        received: totalPacketsReceivedDelta,
+        lost: totalPacketsLostDelta,
+      });
 
-      // ── Step F: Filter a dynacast-paused simulcast backup codec track ──
+      // ── Step E: Filter a dynacast-paused simulcast backup codec track ──
       const filteredVideoTracks = videoTracks.filter((track) => {
         if (track.direction !== 'send' || track.bitrate > 0) return true;
         const hasActiveSibling = videoTracks.some(
@@ -583,7 +568,7 @@ export function useTrackStats(enabled: boolean): TrackStatsSnapshot | null {
         return !hasActiveSibling;
       });
 
-      // ── Step G: Cleanup stale prevSample entries ──
+      // ── Step F: Cleanup stale prevSample entries ──
       for (const key of prev.keys()) {
         if (!seenKeys.has(key)) {
           prev.delete(key);

@@ -49,9 +49,11 @@
     "network": {
       "ping": "Ping",
       "packetLoss": "Packet Loss",
-      "jitter": "Jitter",
+      "jitter": "Inbound audio jitter",
       "server": "Server",
-      "protocol": "Protocol"
+      "localCandidate": "Local candidate",
+      "protocol": "Protocol",
+      "networkType": "Network type"
     },
     "video": {
       "requestedCodec": "Requested codec",
