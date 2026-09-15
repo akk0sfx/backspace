@@ -1,10 +1,11 @@
-import { app, shell } from 'electron';
+import { app, session, shell } from 'electron';
 import type { BrowserWindow, MenuItemConstructorOptions } from 'electron';
 import type { AppUpdater } from 'electron-updater';
 import path from 'path';
 import { loadInstanceUrl, clearInstanceUrl, getPickerPath } from './instanceUrl';
 import { RELEASES_URL } from './updateStatus';
 import { getDesktopLanguage, translateDesktop, type DesktopLanguage } from './l10n';
+import { resetNetworkSession } from './networkReset';
 
 export type RecoveryReasonCode =
   | 'load-failed'
@@ -445,6 +446,17 @@ export function isValidRecoveryAction(action: unknown): action is RecoveryAction
   return typeof action === 'string' && VALID_ACTIONS.has(action);
 }
 
+async function reloadInstanceAfterNetworkReset(url: string): Promise<void> {
+  const failures = await resetNetworkSession(session.defaultSession);
+  for (const failure of failures) {
+    console.warn(`[recovery] network reset step failed (${failure.step}):`, failure.error);
+  }
+
+  // The window can disappear while asynchronous Chromium cleanup is running.
+  if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
+  await mainWindowRef.loadURL(url);
+}
+
 export function handleRecoveryAction(action: RecoveryAction): void {
   switch (action) {
     case 'reload': {
@@ -458,7 +470,11 @@ export function handleRecoveryAction(action: RecoveryAction): void {
         mainWindowRef?.loadFile(getPickerPath(), { query: { lang: getDesktopLanguage() } });
         return;
       }
-      mainWindowRef?.loadURL(url);
+      void reloadInstanceAfterNetworkReset(url).catch((error) => {
+        // did-fail-load handles ordinary navigation failures. This catch covers
+        // promise-level failures as well, without creating an unhandled rejection.
+        console.error('[recovery] reload failed:', error);
+      });
       return;
     }
     case 'check-update': {
